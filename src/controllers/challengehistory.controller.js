@@ -1,7 +1,9 @@
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import prisma from "../../prismaClient.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import ChallengeHistory from "../models/challengehistory.model.js";
+import DailyChallenge from "../models/dailychallenge.model.js";
+import User from "../models/user.model.js";
 
 // Create a new challenge history entry
 const createChallengeHistory = asyncHandler(async (req, res) => {
@@ -11,29 +13,20 @@ const createChallengeHistory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Date and dailyId are required");
   }
 
-  const challengeHistory = await prisma.challengeHistory.create({
-    data: {
-      date: new Date(date),
-      rewardsClaimed: rewardsClaimed || false,
-      dailyId
-    },
-    include: {
-      daily: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          }
-        }
-      }
-    }
+  const challengeHistory = await ChallengeHistory.create({
+    date: new Date(date),
+    rewardsClaimed: rewardsClaimed || false,
+    dailyId
   });
 
+  const populated = await ChallengeHistory.findById(challengeHistory._id)
+    .populate({
+      path: "dailyId",
+      populate: { path: "userId", select: "_id name email" }
+    });
+
   return res.status(201).json(
-    new ApiResponse(201, challengeHistory, "Challenge history created successfully")
+    new ApiResponse(201, populated, "Challenge history created successfully")
   );
 });
 
@@ -45,21 +38,12 @@ const getDailyChallengeHistory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Daily challenge ID is required");
   }
 
-  const history = await prisma.challengeHistory.findMany({
-    where: { dailyId: parseInt(dailyId) },
-    include: {
-      daily: {
-        select: {
-          id: true,
-          date: true,
-          userId: true
-        }
-      }
-    },
-    orderBy: {
-      date: 'desc'
-    }
-  });
+  const history = await ChallengeHistory.find({ dailyId })
+    .populate({
+      path: "dailyId",
+      select: "_id date userId"
+    })
+    .sort({ date: -1 });
 
   return res.status(200).json(
     new ApiResponse(200, history, "Challenge history retrieved successfully")
@@ -74,22 +58,11 @@ const getChallengeHistoryById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "History ID is required");
   }
 
-  const history = await prisma.challengeHistory.findUnique({
-    where: { id: parseInt(historyId) },
-    include: {
-      daily: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          }
-        }
-      }
-    }
-  });
+  const history = await ChallengeHistory.findById(historyId)
+    .populate({
+      path: "dailyId",
+      populate: { path: "userId", select: "_id name email" }
+    });
 
   if (!history) {
     throw new ApiError(404, "Challenge history not found");
@@ -109,22 +82,12 @@ const updateChallengeHistory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "History ID is required");
   }
 
-  const history = await prisma.challengeHistory.update({
-    where: { id: parseInt(historyId) },
-    data: {
-      ...(date && { date: new Date(date) }),
-      ...(rewardsClaimed !== undefined && { rewardsClaimed })
-    },
-    include: {
-      daily: {
-        select: {
-          id: true,
-          date: true,
-          userId: true
-        }
-      }
-    }
-  });
+  const update = {};
+  if (date) update.date = new Date(date);
+  if (rewardsClaimed !== undefined) update.rewardsClaimed = rewardsClaimed;
+
+  const history = await ChallengeHistory.findByIdAndUpdate(historyId, update, { new: true })
+    .populate({ path: "dailyId", select: "_id date userId" });
 
   return res.status(200).json(
     new ApiResponse(200, history, "Challenge history updated successfully")
@@ -139,9 +102,7 @@ const deleteChallengeHistory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "History ID is required");
   }
 
-  await prisma.challengeHistory.delete({
-    where: { id: parseInt(historyId) }
-  });
+  await ChallengeHistory.findByIdAndDelete(historyId);
 
   return res.status(200).json(
     new ApiResponse(200, null, "Challenge history deleted successfully")
@@ -156,25 +117,13 @@ const getUserChallengeHistory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User ID is required");
   }
 
-  const history = await prisma.challengeHistory.findMany({
-    where: {
-      daily: {
-        userId: parseInt(userId)
-      }
-    },
-    include: {
-      daily: {
-        select: {
-          id: true,
-          date: true,
-          userId: true
-        }
-      }
-    },
-    orderBy: {
-      date: 'desc'
-    }
-  });
+  // Find all daily challenges for the user
+  const dailyChallenges = await DailyChallenge.find({ userId });
+  const dailyIds = dailyChallenges.map((d) => d._id);
+
+  const history = await ChallengeHistory.find({ dailyId: { $in: dailyIds } })
+    .populate({ path: "dailyId", select: "_id date userId" })
+    .sort({ date: -1 });
 
   return res.status(200).json(
     new ApiResponse(200, history, "User challenge history retrieved successfully")

@@ -1,7 +1,8 @@
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import prisma from "../../prismaClient.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import Item from "../models/item.model.js";
+import User from "../models/user.model.js";
 
 // Create a new item
 const createItem = asyncHandler(async (req, res) => {
@@ -11,30 +12,27 @@ const createItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Name, description, price, type, and amount are required");
   }
 
-  const item = await prisma.item.create({
-    data: {
-      name,
-      description,
-      price,
-      image: image || "",
-      type: type.toUpperCase(),
-      amount,
-      attribute_name: attribute_name || null,
-      userId: userId || null
-    },
-    include: userId ? {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    } : false
+  const item = await Item.create({
+    name,
+    description,
+    price,
+    image: image || "",
+    type: type.toUpperCase(),
+    amount,
+    attribute_name: attribute_name || null,
+    userId: userId || null,
   });
 
+  let populatedItem = item;
+  if (userId) {
+    populatedItem = await Item.findById(item._id).populate({
+      path: "userId",
+      select: "_id name email",
+    });
+  }
+
   return res.status(201).json(
-    new ApiResponse(201, item, "Item created successfully")
+    new ApiResponse(201, populatedItem, "Item created successfully")
   );
 });
 
@@ -46,21 +44,9 @@ const getUserItems = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User ID is required");
   }
 
-  const items = await prisma.item.findMany({
-    where: { userId: parseInt(userId) },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    },
-    orderBy: {
-      createdAt: 'desc'
-    }
-  });
+  const items = await Item.find({ userId })
+    .populate({ path: "userId", select: "_id name email" })
+    .sort({ createdAt: -1 });
 
   return res.status(200).json(
     new ApiResponse(200, items, "User items retrieved successfully")
@@ -69,12 +55,7 @@ const getUserItems = asyncHandler(async (req, res) => {
 
 // Get all store items (items without userId)
 const getStoreItems = asyncHandler(async (req, res) => {
-  const items = await prisma.item.findMany({
-    where: { userId: null },
-    orderBy: {
-      price: 'asc'
-    }
-  });
+  const items = await Item.find({ userId: null }).sort({ price: 1 });
 
   return res.status(200).json(
     new ApiResponse(200, items, "Store items retrieved successfully")
@@ -89,17 +70,9 @@ const getItemById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item ID is required");
   }
 
-  const item = await prisma.item.findUnique({
-    where: { id: parseInt(itemId) },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const item = await Item.findById(itemId).populate({
+    path: "userId",
+    select: "_id name email",
   });
 
   if (!item) {
@@ -120,27 +93,19 @@ const updateItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item ID is required");
   }
 
-  const item = await prisma.item.update({
-    where: { id: parseInt(itemId) },
-    data: {
-      ...(name && { name }),
-      ...(description && { description }),
-      ...(price !== undefined && { price }),
-      ...(image !== undefined && { image }),
-      ...(type && { type: type.toUpperCase() }),
-      ...(amount !== undefined && { amount }),
-      ...(claimed !== undefined && { claimed }),
-      ...(attribute_name !== undefined && { attribute_name })
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const update = {};
+  if (name) update.name = name;
+  if (description) update.description = description;
+  if (price !== undefined) update.price = price;
+  if (image !== undefined) update.image = image;
+  if (type) update.type = type.toUpperCase();
+  if (amount !== undefined) update.amount = amount;
+  if (claimed !== undefined) update.claimed = claimed;
+  if (attribute_name !== undefined) update.attribute_name = attribute_name;
+
+  const item = await Item.findByIdAndUpdate(itemId, update, { new: true }).populate({
+    path: "userId",
+    select: "_id name email",
   });
 
   return res.status(200).json(
@@ -156,9 +121,7 @@ const deleteItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item ID is required");
   }
 
-  await prisma.item.delete({
-    where: { id: parseInt(itemId) }
-  });
+  await Item.findByIdAndDelete(itemId);
 
   return res.status(200).json(
     new ApiResponse(200, null, "Item deleted successfully")
@@ -174,9 +137,7 @@ const purchaseItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item ID and user ID are required");
   }
 
-  const storeItem = await prisma.item.findUnique({
-    where: { id: parseInt(itemId) }
-  });
+  const storeItem = await Item.findById(itemId);
 
   if (!storeItem) {
     throw new ApiError(404, "Item not found");
@@ -186,9 +147,7 @@ const purchaseItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item is not available for purchase");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: parseInt(userId) }
-  });
+  const user = await User.findById(userId);
 
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -199,34 +158,20 @@ const purchaseItem = asyncHandler(async (req, res) => {
   }
 
   // Create a new item for the user's inventory
-  const purchasedItem = await prisma.item.create({
-    data: {
-      name: storeItem.name,
-      description: storeItem.description,
-      price: storeItem.price,
-      image: storeItem.image,
-      type: storeItem.type,
-      amount: storeItem.amount,
-      attribute_name: storeItem.attribute_name,
-      userId: parseInt(userId),
-      claimed: false
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const purchasedItem = await Item.create({
+    name: storeItem.name,
+    description: storeItem.description,
+    price: storeItem.price,
+    image: storeItem.image,
+    type: storeItem.type,
+    amount: storeItem.amount,
+    attribute_name: storeItem.attribute_name,
+    userId: userId,
+    claimed: false,
   });
 
   // Deduct coins from user
-  await prisma.user.update({
-    where: { id: parseInt(userId) },
-    data: { coins: { decrement: storeItem.price } }
-  });
+  await User.findByIdAndUpdate(userId, { $inc: { coins: -storeItem.price } });
 
   return res.status(201).json(
     new ApiResponse(201, purchasedItem, "Item purchased successfully")
@@ -241,10 +186,7 @@ const useItem = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Item ID is required");
   }
 
-  const item = await prisma.item.findUnique({
-    where: { id: parseInt(itemId) },
-    include: { user: true }
-  });
+  const item = await Item.findById(itemId).populate("userId");
 
   if (!item) {
     throw new ApiError(404, "Item not found");
@@ -258,38 +200,19 @@ const useItem = asyncHandler(async (req, res) => {
   let updatedUser = null;
   if (item.type === "MAGICAL ITEM" && item.attribute_name) {
     const attribute = item.attribute_name.toLowerCase();
-    
     if (attribute === "health") {
-      updatedUser = await prisma.user.update({
-        where: { id: item.userId },
-        data: { health: { increment: item.amount } }
-      });
+      updatedUser = await User.findByIdAndUpdate(item.userId, { $inc: { health: item.amount } }, { new: true });
     } else if (attribute === "coins") {
-      updatedUser = await prisma.user.update({
-        where: { id: item.userId },
-        data: { coins: { increment: item.amount } }
-      });
+      updatedUser = await User.findByIdAndUpdate(item.userId, { $inc: { coins: item.amount } }, { new: true });
     } else if (attribute === "experience") {
-      updatedUser = await prisma.user.update({
-        where: { id: item.userId },
-        data: { exp: { increment: item.amount } }
-      });
+      updatedUser = await User.findByIdAndUpdate(item.userId, { $inc: { exp: item.amount } }, { new: true });
     }
   }
 
   // Mark item as claimed
-  const updatedItem = await prisma.item.update({
-    where: { id: parseInt(itemId) },
-    data: { claimed: true },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const updatedItem = await Item.findByIdAndUpdate(itemId, { claimed: true }, { new: true }).populate({
+    path: "userId",
+    select: "_id name email",
   });
 
   return res.status(200).json(
@@ -305,5 +228,5 @@ export {
   updateItem,
   deleteItem,
   purchaseItem,
-  useItem
+  useItem,
 };

@@ -52,6 +52,7 @@ import challengeRouter from "./src/routes/challenge.routes.js";
 import taskRouter from "./src/routes/task.routes.js";
 import challengeHistoryRouter from "./src/routes/challengehistory.routes.js";
 import dailyRewardRouter from "./src/routes/dailyreward.routes.js";
+import connect from "./src/db/db.js";
 
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/stats", statRouter);
@@ -70,16 +71,19 @@ app.use((err, req, res, next) => {
   const statusCode = err.status || 500;
 
   return res.status(statusCode).json({
-    success: err.success || false,
-    message: err.message || "Internal Server Error",
-    errors: err.errors || [],
-    // ommit stack trace in the production environment
-    stack: err.stack || undefined,
+    ok: false,
+    success: false,
+    error: {
+      message: err.message || "something went wrong",
+      errors: err.errors || [],
+    },
   });
 });
 
 const port = process.env.PORT || 8000;
 // starts the application at port number 8000
-app.listen(port, () => {
-  console.log("server running on port :", port);
-});
+connect().then(
+  app.listen(port, () => {
+    console.log("server running on port :", port);
+  })
+);

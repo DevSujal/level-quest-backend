@@ -1,7 +1,8 @@
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import prisma from "../../prismaClient.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import Stat from "../models/stat.model.js";
+import User from "../models/user.model.js";
 
 // Create a new stat
 const createStat = asyncHandler(async (req, res) => {
@@ -11,26 +12,20 @@ const createStat = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Skill and userId are required");
   }
 
-  const stat = await prisma.stat.create({
-    data: {
-      skill,
-      level: level || 1,
-      value: value || 0,
-      userId
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const stat = await Stat.create({
+    skill,
+    level: level || 1,
+    value: value || 0,
+    userId
+  });
+
+  const populatedStat = await Stat.findById(stat._id).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   return res.status(201).json(
-    new ApiResponse(201, stat, "Stat created successfully")
+    new ApiResponse(201, populatedStat, "Stat created successfully")
   );
 });
 
@@ -42,21 +37,9 @@ const getUserStats = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User ID is required");
   }
 
-  const stats = await prisma.stat.findMany({
-    where: { userId: parseInt(userId) },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    },
-    orderBy: {
-      skill: 'asc'
-    }
-  });
+  const stats = await Stat.find({ userId })
+    .populate({ path: "userId", select: "_id name email" })
+    .sort({ skill: 1 });
 
   return res.status(200).json(
     new ApiResponse(200, stats, "Stats retrieved successfully")
@@ -71,17 +54,9 @@ const getStatById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Stat ID is required");
   }
 
-  const stat = await prisma.stat.findUnique({
-    where: { id: parseInt(statId) },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const stat = await Stat.findById(statId).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   if (!stat) {
@@ -102,22 +77,14 @@ const updateStat = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Stat ID is required");
   }
 
-  const stat = await prisma.stat.update({
-    where: { id: parseInt(statId) },
-    data: {
-      ...(skill && { skill }),
-      ...(level !== undefined && { level }),
-      ...(value !== undefined && { value })
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const update = {};
+  if (skill) update.skill = skill;
+  if (level !== undefined) update.level = level;
+  if (value !== undefined) update.value = value;
+
+  const stat = await Stat.findByIdAndUpdate(statId, update, { new: true }).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   return res.status(200).json(
@@ -133,9 +100,7 @@ const deleteStat = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Stat ID is required");
   }
 
-  await prisma.stat.delete({
-    where: { id: parseInt(statId) }
-  });
+  await Stat.findByIdAndDelete(statId);
 
   return res.status(200).json(
     new ApiResponse(200, null, "Stat deleted successfully")
@@ -153,25 +118,19 @@ const incrementStat = asyncHandler(async (req, res) => {
 
   const incrementAmount = amount || 1;
 
-  const stat = await prisma.stat.update({
-    where: { id: parseInt(statId) },
-    data: { 
-      value: { increment: incrementAmount },
-      // Level up logic: every 100 points = 1 level
-      level: { 
-        set: Math.floor((await prisma.stat.findUnique({ where: { id: parseInt(statId) } })).value / 100) + 1 
-      }
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
-  });
+  // Get current stat
+  const statDoc = await Stat.findById(statId);
+  if (!statDoc) {
+    throw new ApiError(404, "Stat not found");
+  }
+  const newValue = statDoc.value + incrementAmount;
+  const newLevel = Math.floor(newValue / 100) + 1;
+
+  const stat = await Stat.findByIdAndUpdate(
+    statId,
+    { $inc: { value: incrementAmount }, level: newLevel },
+    { new: true }
+  ).populate({ path: "userId", select: "_id name email" });
 
   return res.status(200).json(
     new ApiResponse(200, stat, "Stat incremented successfully")
@@ -186,20 +145,9 @@ const getUserStatBySkill = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User ID and skill are required");
   }
 
-  const stat = await prisma.stat.findFirst({
-    where: { 
-      userId: parseInt(userId),
-      skill: skill 
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const stat = await Stat.findOne({ userId, skill }).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   return res.status(200).json(

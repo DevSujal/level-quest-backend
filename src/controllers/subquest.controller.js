@@ -1,7 +1,11 @@
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import prisma from "../../prismaClient.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import SubQuest from "../models/subquest.model.js";
+import Reward from "../models/reward.model.js";
+import Quest from "../models/quest.model.js";
+import User from "../models/user.model.js";
+import Stat from "../models/stat.model.js";
 
 // Create a new subquest
 const createSubQuest = asyncHandler(async (req, res) => {
@@ -11,35 +15,25 @@ const createSubQuest = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Name and questId are required");
   }
 
-  const subQuest = await prisma.subQuest.create({
-    data: {
-      name,
-      completed: completed || false,
-      claim: claim || false,
-      questId,
-      rewards: rewards ? {
-        create: rewards.map(reward => ({
-          type: reward.type,
-          amount: reward.amount,
-          skill: reward.skill,
-          itemId: reward.itemId
-        }))
-      } : undefined
-    },
-    include: {
-      rewards: true,
-      quest: {
-        select: {
-          id: true,
-          name: true,
-          userId: true
-        }
-      }
-    }
+  let rewardDocs = [];
+  if (rewards && rewards.length > 0) {
+    rewardDocs = await Reward.insertMany(rewards);
+  }
+
+  const subQuest = await SubQuest.create({
+    name,
+    completed: completed || false,
+    claim: claim || false,
+    questId,
+    rewards: rewardDocs.map((r) => r._id),
   });
 
+  const populated = await SubQuest.findById(subQuest._id)
+    .populate("rewards")
+    .populate({ path: "questId", select: "_id name userId" });
+
   return res.status(201).json(
-    new ApiResponse(201, subQuest, "SubQuest created successfully")
+    new ApiResponse(201, populated, "SubQuest created successfully")
   );
 });
 
@@ -51,15 +45,9 @@ const getQuestSubQuests = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Quest ID is required");
   }
 
-  const subQuests = await prisma.subQuest.findMany({
-    where: { questId: parseInt(questId) },
-    include: {
-      rewards: true
-    },
-    orderBy: {
-      createdAt: 'desc'
-    }
-  });
+  const subQuests = await SubQuest.find({ questId })
+    .populate("rewards")
+    .sort({ createdAt: -1 });
 
   return res.status(200).json(
     new ApiResponse(200, subQuests, "SubQuests retrieved successfully")
@@ -74,23 +62,12 @@ const getSubQuestById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "SubQuest ID is required");
   }
 
-  const subQuest = await prisma.subQuest.findUnique({
-    where: { id: parseInt(subQuestId) },
-    include: {
-      rewards: true,
-      quest: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          }
-        }
-      }
-    }
-  });
+  const subQuest = await SubQuest.findById(subQuestId)
+    .populate("rewards")
+    .populate({
+      path: "questId",
+      populate: { path: "userId", select: "_id name email" },
+    });
 
   if (!subQuest) {
     throw new ApiError(404, "SubQuest not found");
@@ -110,18 +87,14 @@ const updateSubQuest = asyncHandler(async (req, res) => {
     throw new ApiError(400, "SubQuest ID is required");
   }
 
-  const subQuest = await prisma.subQuest.update({
-    where: { id: parseInt(subQuestId) },
-    data: {
-      ...(name && { name }),
-      ...(completed !== undefined && { completed }),
-      ...(claim !== undefined && { claim })
-    },
-    include: {
-      rewards: true,
-      quest: true
-    }
-  });
+  const update = {};
+  if (name) update.name = name;
+  if (completed !== undefined) update.completed = completed;
+  if (claim !== undefined) update.claim = claim;
+
+  const subQuest = await SubQuest.findByIdAndUpdate(subQuestId, update, { new: true })
+    .populate("rewards")
+    .populate("questId");
 
   return res.status(200).json(
     new ApiResponse(200, subQuest, "SubQuest updated successfully")
@@ -136,9 +109,7 @@ const deleteSubQuest = asyncHandler(async (req, res) => {
     throw new ApiError(400, "SubQuest ID is required");
   }
 
-  await prisma.subQuest.delete({
-    where: { id: parseInt(subQuestId) }
-  });
+  await SubQuest.findByIdAndDelete(subQuestId);
 
   return res.status(200).json(
     new ApiResponse(200, null, "SubQuest deleted successfully")
@@ -153,51 +124,28 @@ const completeSubQuest = asyncHandler(async (req, res) => {
     throw new ApiError(400, "SubQuest ID is required");
   }
 
-  const subQuest = await prisma.subQuest.update({
-    where: { id: parseInt(subQuestId) },
-    data: { completed: true },
-    include: {
-      rewards: true,
-      quest: {
-        include: {
-          user: true
-        }
-      }
-    }
-  });
+  const subQuest = await SubQuest.findByIdAndUpdate(
+    subQuestId,
+    { completed: true },
+    { new: true }
+  )
+    .populate("rewards")
+    .populate({ path: "questId", populate: { path: "userId" } });
 
   // Apply rewards to user
   if (subQuest.rewards && subQuest.rewards.length > 0) {
     for (const reward of subQuest.rewards) {
-      if (reward.type === 'COINS') {
-        await prisma.user.update({
-          where: { id: subQuest.quest.userId },
-          data: { coins: { increment: reward.amount } }
-        });
-      } else if (reward.type === 'EXPERIENCE') {
-        await prisma.user.update({
-          where: { id: subQuest.quest.userId },
-          data: { exp: { increment: reward.amount } }
-        });
-      } else if (reward.type === 'SKILL' && reward.skill) {
+      if (reward.type === "COINS") {
+        await User.findByIdAndUpdate(subQuest.questId.userId, { $inc: { coins: reward.amount } });
+      } else if (reward.type === "EXPERIENCE") {
+        await User.findByIdAndUpdate(subQuest.questId.userId, { $inc: { exp: reward.amount } });
+      } else if (reward.type === "SKILL" && reward.skill) {
         // Update or create skill stat
-        const existingStat = await prisma.stat.findFirst({
-          where: { userId: subQuest.quest.userId, skill: reward.skill }
-        });
-
+        let existingStat = await Stat.findOne({ userId: subQuest.questId.userId, skill: reward.skill });
         if (existingStat) {
-          await prisma.stat.update({
-            where: { id: existingStat.id },
-            data: { value: { increment: reward.amount } }
-          });
+          await Stat.findByIdAndUpdate(existingStat._id, { $inc: { value: reward.amount } });
         } else {
-          await prisma.stat.create({
-            data: {
-              skill: reward.skill,
-              value: reward.amount,
-              userId: subQuest.quest.userId
-            }
-          });
+          await Stat.create({ skill: reward.skill, value: reward.amount, userId: subQuest.questId.userId });
         }
       }
     }
@@ -216,17 +164,7 @@ const claimSubQuestRewards = asyncHandler(async (req, res) => {
     throw new ApiError(400, "SubQuest ID is required");
   }
 
-  const subQuest = await prisma.subQuest.findUnique({
-    where: { id: parseInt(subQuestId) },
-    include: {
-      rewards: true,
-      quest: {
-        include: {
-          user: true
-        }
-      }
-    }
-  });
+  const subQuest = await SubQuest.findById(subQuestId);
 
   if (!subQuest) {
     throw new ApiError(404, "SubQuest not found");
@@ -240,14 +178,11 @@ const claimSubQuestRewards = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Rewards already claimed");
   }
 
-  // Update claim status
-  const updatedSubQuest = await prisma.subQuest.update({
-    where: { id: parseInt(subQuestId) },
-    data: { claim: true }
-  });
+  subQuest.claim = true;
+  await subQuest.save();
 
   return res.status(200).json(
-    new ApiResponse(200, updatedSubQuest, "SubQuest rewards claimed successfully")
+    new ApiResponse(200, subQuest, "SubQuest rewards claimed successfully")
   );
 });
 
@@ -258,5 +193,5 @@ export {
   updateSubQuest,
   deleteSubQuest,
   completeSubQuest,
-  claimSubQuestRewards
+  claimSubQuestRewards,
 };

@@ -1,7 +1,7 @@
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import jwt from "jsonwebtoken";
-import prisma from "../../prismaClient.js";
+import User from "../models/user.model.js";
 
 const validateUser = asyncHandler(async (req, _, next) => {
   // we know typically athorization will look like
@@ -19,20 +19,16 @@ const validateUser = asyncHandler(async (req, _, next) => {
     process.env.ACCESS_TOKEN_SECRET
   );
 
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: decodedAccessToken?.userId,
-    },
-  });
+  const user = await User.findById(decodedAccessToken?.userId);
 
   if (!user) {
     throw new ApiError(401, "invalid access token");
   }
 
-  delete user.password;
+  const userObj = user.toObject();
+  delete userObj.password;
 
-  req.user = user;
+  req.user = userObj;
 
   next();
 });

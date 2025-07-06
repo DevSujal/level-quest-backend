@@ -1,7 +1,8 @@
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import prisma from "../../prismaClient.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import Task from "../models/task.model.js";
+import User from "../models/user.model.js";
 
 // Create a new task
 const createTask = asyncHandler(async (req, res) => {
@@ -11,26 +12,20 @@ const createTask = asyncHandler(async (req, res) => {
     throw new ApiError(400, "ID, name, and userId are required");
   }
 
-  const task = await prisma.task.create({
-    data: {
-      id,
-      name,
-      userId,
-      isCompleted: false
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const task = await Task.create({
+    _id: id,
+    name,
+    userId,
+    isCompleted: false
+  });
+
+  const populatedTask = await Task.findById(task._id).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   return res.status(201).json(
-    new ApiResponse(201, task, "Task created successfully")
+    new ApiResponse(201, populatedTask, "Task created successfully")
   );
 });
 
@@ -42,21 +37,9 @@ const getUserTasks = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User ID is required");
   }
 
-  const tasks = await prisma.task.findMany({
-    where: { userId: parseInt(userId) },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    },
-    orderBy: {
-      createdAt: 'desc'
-    }
-  });
+  const tasks = await Task.find({ userId })
+    .populate({ path: "userId", select: "_id name email" })
+    .sort({ createdAt: -1 });
 
   return res.status(200).json(
     new ApiResponse(200, tasks, "Tasks retrieved successfully")
@@ -71,17 +54,9 @@ const getTaskById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Task ID is required");
   }
 
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const task = await Task.findById(taskId).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   if (!task) {
@@ -102,21 +77,13 @@ const updateTask = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Task ID is required");
   }
 
-  const task = await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      ...(name && { name }),
-      ...(isCompleted !== undefined && { isCompleted })
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    }
+  const update = {};
+  if (name) update.name = name;
+  if (isCompleted !== undefined) update.isCompleted = isCompleted;
+
+  const task = await Task.findByIdAndUpdate(taskId, update, { new: true }).populate({
+    path: "userId",
+    select: "_id name email"
   });
 
   return res.status(200).json(
@@ -132,9 +99,7 @@ const deleteTask = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Task ID is required");
   }
 
-  await prisma.task.delete({
-    where: { id: taskId }
-  });
+  await Task.findByIdAndDelete(taskId);
 
   return res.status(200).json(
     new ApiResponse(200, null, "Task deleted successfully")
@@ -149,19 +114,16 @@ const completeTask = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Task ID is required");
   }
 
-  const task = await prisma.task.update({
-    where: { id: taskId },
-    data: { isCompleted: true },
-    include: {
-      user: true
-    }
-  });
+  const task = await Task.findByIdAndUpdate(
+    taskId,
+    { isCompleted: true },
+    { new: true }
+  ).populate("userId");
 
   // Give some experience points for completing a task
-  await prisma.user.update({
-    where: { id: task.userId },
-    data: { exp: { increment: 10 } }
-  });
+  if (task && task.userId) {
+    await User.findByIdAndUpdate(task.userId, { $inc: { exp: 10 } });
+  }
 
   return res.status(200).json(
     new ApiResponse(200, task, "Task completed successfully")
@@ -178,31 +140,15 @@ const getTasksByDate = asyncHandler(async (req, res) => {
 
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
-  
   const endOfDay = new Date(date);
   endOfDay.setHours(23, 59, 59, 999);
 
-  const tasks = await prisma.task.findMany({
-    where: {
-      userId: parseInt(userId),
-      createdAt: {
-        gte: startOfDay,
-        lte: endOfDay
-      }
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    },
-    orderBy: {
-      createdAt: 'asc'
-    }
-  });
+  const tasks = await Task.find({
+    userId,
+    createdAt: { $gte: startOfDay, $lte: endOfDay }
+  })
+    .populate({ path: "userId", select: "_id name email" })
+    .sort({ createdAt: 1 });
 
   return res.status(200).json(
     new ApiResponse(200, tasks, `Tasks retrieved successfully for ${date}`)
