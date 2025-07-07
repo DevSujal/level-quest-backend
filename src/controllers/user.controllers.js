@@ -121,9 +121,8 @@ const registerUser = asyncHandler(async (req, res) => {
   res.json(new ApiResponse(201, userObj, "user created successfully"));
 });
 
-const refreshAccessToken = asyncHandler(async (req, res) => {
-  const incomingRefreshToken =
-    req.cookies?.refreshToken || req.body?.refreshToken;
+const getUser = asyncHandler(async (req, res) => {
+  const incomingRefreshToken = req.cookies?.refreshToken;
   if (!incomingRefreshToken) {
     throw new ApiError(401, "uauthorized request refresh token is not present");
   }
@@ -145,7 +144,8 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     user._id
   );
   const userObj = user.toObject();
-  delete [userObj.password, userObj.refreshToken];
+  delete userObj.password;
+  delete userObj.refreshToken;
   res
     .cookie("refreshToken", refreshToken, OPTION)
     .cookie("accessToken", accessToken, OPTION)
@@ -173,6 +173,29 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.json(new ApiResponse(200, userObj, "profile updated successfully"));
 });
 
+const uploadProfilePic = asyncHandler(async (req, res) => {
+  const path = req.file.path;
+
+  if (!path) {
+    throw new ApiError(400, "image path not found");
+  }
+
+  const userId = req.user._id;
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    { profilePic: path },
+    { new: true }
+  ).select("-refreshToken -password");
+
+  if (!updatedUser) {
+    throw new ApiError(500, "internal server error while updating user");
+  }
+
+  return res.json(
+    new ApiResponse(200, updatedUser, "user updated successfully")
+  );
+});
+
 const updatePassword = asyncHandler(async (req, res) => {
   const { prevPassword, newPassword } = req.body;
   if (!prevPassword || !newPassword) {
@@ -181,7 +204,7 @@ const updatePassword = asyncHandler(async (req, res) => {
       "prev password and new passoword is required to change password"
     );
   }
-  const user = await User.findById(req.user.userId);
+  const user = await User.findById(req.user._id);
   const isMatched = await bcrypt.compare(prevPassword, user.password);
   if (!isMatched) {
     throw new ApiError(401, "invalid password");
@@ -206,28 +229,12 @@ const logoutUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "user logged out successfully"));
 });
 
-const getUserDetails = asyncHandler(async (req, res) => {
-  const userId = req.params.userId;
-  if (!userId) {
-    throw new ApiError(400, "user id required");
-  }
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(500, "something went wrong while finding user");
-  }
-  const userObj = user.toObject();
-  delete userObj.password;
-  delete userObj.refreshToken;
-  delete userObj.email;
-  res.json(new ApiResponse(200, userObj, "user retrieved successfully"));
-});
-
 export {
   loginUser,
   registerUser,
-  refreshAccessToken,
+  getUser,
   updateProfile,
   updatePassword,
   logoutUser,
-  getUserDetails,
+  uploadProfilePic,
 };

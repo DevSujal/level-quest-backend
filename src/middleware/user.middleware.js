@@ -9,7 +9,6 @@ const validateUser = asyncHandler(async (req, _, next) => {
   // thats why we are spliting it taking taking the 2nd position which is token
   const accessToken =
     req.cookies?.accessToken || req.header("Authorization")?.split(" ")[1];
-
   if (!accessToken) {
     throw new ApiError(401, "unauthorized access");
   }

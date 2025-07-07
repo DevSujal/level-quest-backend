@@ -69,7 +69,7 @@ app.use("/api/v1/daily-rewards", dailyRewardRouter);
 // Global error handler
 app.use((err, req, res, next) => {
   const statusCode = err.status || 500;
-
+console.log(err);
   return res.status(statusCode).json({
     ok: false,
     success: false,
