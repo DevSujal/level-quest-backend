@@ -79,7 +79,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8000;
 // starts the application at port number 8000
 connect().then(
   app.listen(port, () => {
