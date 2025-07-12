@@ -18,10 +18,10 @@ router
   .route("/user")
   .get(getUser)
   .post(registerUser)
-  .patch(validateUser, updateProfile);
-router
-  .route("/profile-pic")
-  .post(validateUser, upload.single("image"), uploadProfilePic);
+  .patch(validateUser, upload.single("profilePic"), updateProfile);
+// router
+//   .route("/profile-pic")
+//   .post(validateUser, upload.single("image"), uploadProfilePic);
 router.route("/password").put(validateUser, updatePassword);
 router.route("/logout").get(validateUser, logoutUser);
 

@@ -1,10 +1,9 @@
+import dotenv from "dotenv";
+dotenv.config();
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 const app = express();
-import dotenv from "dotenv";
-
-dotenv.config();
 
 // app.use is a middleware which runs before running the acutual route
 // cross browser resource sharing
@@ -69,7 +68,7 @@ app.use("/api/v1/daily-rewards", dailyRewardRouter);
 // Global error handler
 app.use((err, req, res, next) => {
   const statusCode = err.status || 500;
-console.log(err);
+  console.log(err);
   return res.status(statusCode).json({
     ok: false,
     success: false,
@@ -80,7 +79,7 @@ console.log(err);
   });
 });
 
-const port = process.env.PORT || 8000;
+const port = process.env.PORT || 3000;
 // starts the application at port number 8000
 connect().then(
   app.listen(port, () => {

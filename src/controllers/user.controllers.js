@@ -154,16 +154,60 @@ const getUser = asyncHandler(async (req, res) => {
     );
 });
 
+//  name: { type: String, required: true },
+//     email: { type: String, required: true, unique: true },
+//     profilePic: String,
+//     password: { type: String, required: true },
+//     refreshToken: String,
+//     level: { type: Number, default: 1 },
+//     exp: { type: Number, default: 50 },
+//     health: { type: Number, default: 100 },
+//     coins: { type: Number, default: 1000 },
+//     job: String,
+//     about: String,
+//     strength: String,
+//     weakness: String,
+//     masterObjective: String,
+//     minorObjective: String,
+
 const updateProfile = asyncHandler(async (req, res) => {
-  const { name, email } = req.body;
-  const user = await User.findByIdAndUpdate(
-    req.user.userId,
-    {
-      name: name || req.user.name,
-      email: email || req.user.email,
-    },
-    { new: true }
+  const {
+    name,
+    job,
+    about,
+    strength,
+    weakness,
+    masterObjective,
+    minorObjective,
+  } = req.body;
+
+  console.log(req.body);
+  console.log(req.file);
+
+  const path = req.file?.path || "";
+  console.log(
+    name,
+    job,
+    about,
+    strength,
+    weakness,
+    masterObjective,
+    minorObjective
   );
+
+  const updateFields = {
+    name: name || req.user.name,
+    job: job || req.user.job,
+    about: about || req.user.about,
+    strength: strength || req.user.strength,
+    weakness: weakness || req.user.weakness,
+    masterObjective: masterObjective || req.user.masterObjective,
+    minorObjective: minorObjective || req.user.minorObjective,
+    profilePic: path || req.user.profilePic,
+  };
+  const user = await User.findByIdAndUpdate(req.user._id, updateFields, {
+    new: true,
+  });
   if (!user) {
     throw new ApiError(500, "something went wrong while updating user profile");
   }
